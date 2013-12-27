@@ -59,6 +59,8 @@ CyBool_t glIsApplnActive = CyFalse;      /* Whether the loopback application is 
 uint16_t    glSectorToWrite;            // Sector number to be WRITTEN
 uint16_t    glSectorToRead;             // Sector number to be READ
 uint16_t    glSizeToRead;               // Data size to be READ
+CyU3PEvent  glFramEvent;                // Event group used to signal the thread a READ/WRITE request.
+uint32_t    glPacketSize;               // Current packet size
 
 /* Application Error Handler */
 void
@@ -169,6 +171,7 @@ CyFxBulkLpApplnStart (
     epCfg.burstLen = 1;
     epCfg.streams = 0;
     epCfg.pcktSize = size;
+    glPacketSize = size;
 
     /* Producer endpoint configuration */
     apiRetStatus = CyU3PSetEpConfig(CY_FX_EP_PRODUCER, &epCfg);
@@ -363,6 +366,7 @@ CyFxBulkLpApplnUSBSetupCB (
             case CY_FX_RQT_FRAM_WRITE:
                 if (wIndex < CY_FX_N_SECTORS) {
                     glSectorToWrite = wIndex;
+                    CyU3PEventSet (&glFramEvent, CY_FX_FRAM_WRITE_READY, CYU3P_EVENT_OR);
                     CyU3PUsbAckSetup();
                     isHandled = CyTrue;
                 }
@@ -370,6 +374,7 @@ CyFxBulkLpApplnUSBSetupCB (
             case CY_FX_RQT_FRAM_READ:
                 if (wIndex < CY_FX_N_SECTORS) {
                     glSectorToRead = wIndex;
+                    CyU3PEventSet (&glFramEvent, CY_FX_FRAM_READ_READY, CYU3P_EVENT_OR);
                     glSizeToRead = wValue;
                     CyU3PUsbAckSetup();
                     isHandled = CyTrue;
@@ -561,6 +566,7 @@ BulkLpAppThread_Entry (
 {
     CyU3PDmaBuffer_t inBuf_p, outBuf_p;
     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+    uint32_t eventFlags;
 
     /* Initialize the debug module */
     CyFxBulkLpApplnDebugInit();
@@ -568,83 +574,102 @@ BulkLpAppThread_Entry (
     /* Initialize the bulk loop application */
     CyFxBulkLpApplnInit();
 
-    for (;;)
-    {
-        if (glIsApplnActive)
-        {
-            /* Wait for receiving a buffer from the producer socket (OUT endpoint). The call
-             * will fail if there was an error or if the USB connection was reset / disconnected.
-             * In case of error invoke the error handler and in case of reset / disconnection,
-             * glIsApplnActive will be CyFalse; continue to beginning of the loop. */
-            status = CyU3PDmaChannelGetBuffer (&glChHandleBulkLpIn, &inBuf_p, CYU3P_WAIT_FOREVER);
-            if (status != CY_U3P_SUCCESS)
-            {
-                if (!glIsApplnActive)
-                {
-                    continue;
+    for (;;) {
+        if (glIsApplnActive) {
+            status = CyU3PEventGet(&glFramEvent,
+                CY_FX_FRAM_WRITE_READY | CY_FX_FRAM_READ_READY,
+                CYU3P_EVENT_OR_CLEAR,
+                &eventFlags,
+                CYU3P_NO_WAIT
+            );
+            if (status != CY_U3P_SUCCESS) {
+                continue;
+            }
+            if (eventFlags & CY_FX_FRAM_WRITE_READY) {
+                /*
+                 * Wait for receiving a buffer from the producer socket (OUT endpoint). The call
+                 * will fail if there was an error or if the USB connection was reset / disconnected.
+                 * In case of error invoke the error handler and in case of reset / disconnection,
+                 * glIsApplnActive will be CyFalse; continue to beginning of the loop.
+                 */
+                status = CyU3PDmaChannelGetBuffer (&glChHandleBulkLpIn, &inBuf_p, CYU3P_WAIT_FOREVER);
+                if (status != CY_U3P_SUCCESS) {
+                    if (!glIsApplnActive) {
+                        continue;
+                    } else {
+                        CyU3PDebugPrint (4, "CyU3PDmaChannelGetBuffer failed, Error code = %d\n", status);
+                        CyFxAppErrorHandler(status);
+                    }
                 }
-                else
-                {
-                    CyU3PDebugPrint (4, "CyU3PDmaChannelGetBuffer failed, Error code = %d\n", status);
-                    CyFxAppErrorHandler(status);
+
+                /*
+                 * Now discard the data from the producer channel so that the buffer is made available
+                 * to receive more data.
+                 */
+                status = CyU3PDmaChannelDiscardBuffer (&glChHandleBulkLpIn);
+                if (status != CY_U3P_SUCCESS) {
+                    if (!glIsApplnActive) {
+                        continue;
+                    } else {
+                        CyU3PDebugPrint (4, "CyU3PDmaChannelDiscardBuffer failed, Error code = %d\n", status);
+                        CyFxAppErrorHandler(status);
+                    }
                 }
             }
-
-            /* Wait for a free buffer to transmit the received data. The failure cases are same as above. */
-            status = CyU3PDmaChannelGetBuffer (&glChHandleBulkLpOut, &outBuf_p, CYU3P_WAIT_FOREVER);
-            if (status != CY_U3P_SUCCESS)
-            {
-                if (!glIsApplnActive)
-                {
-                    continue;
+            if (eventFlags & CY_FX_FRAM_READ_READY) {
+                /*
+                 * Wait for a free buffer to transmit the received data. The failure cases are same as above.
+                 */
+                status = CyU3PDmaChannelGetBuffer (&glChHandleBulkLpOut, &outBuf_p, CYU3P_WAIT_FOREVER);
+                if (status != CY_U3P_SUCCESS) {
+                    if (!glIsApplnActive) {
+                        continue;
+                    } else {
+                        CyU3PDebugPrint (4, "CyU3PDmaChannelGetBuffer failed, Error code = %d\n", status);
+                        CyFxAppErrorHandler(status);
+                    }
                 }
-                else
-                {
-                    CyU3PDebugPrint (4, "CyU3PDmaChannelGetBuffer failed, Error code = %d\n", status);
-                    CyFxAppErrorHandler(status);
+
+                /*
+                 * Commit the received data to the consumer pipe so that the data can be
+                 * transmitted back to the USB host. Since the same data is sent back, the
+                 * count shall be same as received and the status field of the call shall
+                 * be 0 for default use case.
+                 */
+                status = CyU3PDmaChannelCommitBuffer (&glChHandleBulkLpOut, glSizeToRead, 0);
+                if (status != CY_U3P_SUCCESS) {
+                    if (!glIsApplnActive) {
+                        continue;
+                    } else {
+                        CyU3PDebugPrint (4, "CyU3PDmaChannelCommitBuffer failed, Error code = %d\n", status);
+                        CyFxAppErrorHandler(status);
+                    }
+                }
+                if ((glSizeToRead % glPacketSize) == 0) {
+                    /*
+                     * Add ZLP for aligned size of data
+                     */
+                    status = CyU3PDmaChannelGetBuffer (&glChHandleBulkLpOut, &outBuf_p, CYU3P_WAIT_FOREVER);
+                    if (status != CY_U3P_SUCCESS) {
+                        if (!glIsApplnActive) {
+                            continue;
+                        } else {
+                            CyU3PDebugPrint (4, "CyU3PDmaChannelGetBuffer failed, Error code = %d\n", status);
+                            CyFxAppErrorHandler(status);
+                        }
+                    }
+                    status = CyU3PDmaChannelCommitBuffer (&glChHandleBulkLpOut, 0, 0);
+                    if (status != CY_U3P_SUCCESS) {
+                        if (!glIsApplnActive) {
+                            continue;
+                        } else {
+                            CyU3PDebugPrint (4, "CyU3PDmaChannelCommitBuffer failed, Error code = %d\n", status);
+                            CyFxAppErrorHandler(status);
+                        }
+                    }
                 }
             }
-
-            /* Copy the data from the producer channel to the consumer channel. 
-             * The inBuf_p.count holds the amount of valid data received. */
-            CyU3PMemCopy (outBuf_p.buffer, inBuf_p.buffer, inBuf_p.count);
-
-            /* Now discard the data from the producer channel so that the buffer is made available
-             * to receive more data. */
-            status = CyU3PDmaChannelDiscardBuffer (&glChHandleBulkLpIn);
-            if (status != CY_U3P_SUCCESS)
-            {
-                if (!glIsApplnActive)
-                {
-                    continue;
-                }
-                else
-                {
-                    CyU3PDebugPrint (4, "CyU3PDmaChannelDiscardBuffer failed, Error code = %d\n", status);
-                    CyFxAppErrorHandler(status);
-                }
-            }
-
-            /* Commit the received data to the consumer pipe so that the data can be
-             * transmitted back to the USB host. Since the same data is sent back, the
-             * count shall be same as received and the status field of the call shall
-             * be 0 for default use case. */
-            status = CyU3PDmaChannelCommitBuffer (&glChHandleBulkLpOut, inBuf_p.count, 0);
-            if (status != CY_U3P_SUCCESS)
-            {
-                if (!glIsApplnActive)
-                {
-                    continue;
-                }
-                else
-                {
-                    CyU3PDebugPrint (4, "CyU3PDmaChannelCommitBuffer failed, Error code = %d\n", status);
-                    CyFxAppErrorHandler(status);
-                }
-            }
-        }
-        else
-        {
+        } else {
             /* No active data transfer. Sleep for a small amount of time. */
             CyU3PThreadSleep (100);
         }
@@ -657,7 +682,14 @@ CyFxApplicationDefine (
         void)
 {
     void *ptr = NULL;
+    uint32_t status = CY_U3P_SUCCESS;
     uint32_t retThrdCreate = CY_U3P_SUCCESS;
+
+    status = CyU3PEventCreate (&glFramEvent);
+    if (status != 0) {
+        /* Loop indefinitely */
+        while (1);
+    }
 
     /* Allocate the memory for the threads */
     ptr = CyU3PMemAlloc (CY_FX_BULKLP_THREAD_STACK);

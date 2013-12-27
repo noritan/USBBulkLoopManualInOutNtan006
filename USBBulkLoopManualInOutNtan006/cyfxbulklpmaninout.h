@@ -55,6 +55,14 @@
  */
 #define CY_FX_RQT_FRAM_READ             (0xC3)
 
+/*
+ * Event flags to notify the thread that a READ/WRITE request arises
+ * by the host.
+ */
+
+#define CY_FX_FRAM_READ_READY           (1u << 0)
+#define CY_FX_FRAM_WRITE_READY          (1u << 1)
+
 /* Endpoint and socket definitions for the bulkloop application */
 
 /* To change the producer and consumer EP enter the appropriate EP numbers for the #defines.
