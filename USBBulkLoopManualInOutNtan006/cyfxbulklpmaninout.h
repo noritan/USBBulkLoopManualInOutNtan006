@@ -35,6 +35,26 @@
 #define CY_FX_BULKLP_THREAD_STACK       (0x1000)                  /* Bulk loop application thread stack size */
 #define CY_FX_BULKLP_THREAD_PRIORITY    (8)                       /* Bulk loop application thread priority */
 
+#define CY_FX_SECTOR_SIZE               (CY_FX_BULKLP_DMA_BUF_SIZE+32)  // Sector size
+#define CY_FX_N_SECTORS                 (256*1024/CY_FX_SECTOR_SIZE)    // Number of sectors in 2Mbit FRAM
+
+/* USB vendor requests supported by the application. */
+
+/* USB vendor request to initialize WRITE to SPI FRAM. Any bytes of data
+ * can be written to the FRAM at a sector specified by the wIndex parameter.
+ * The maximum allowed data size is 20kBytes.  The data size is specified
+ * by the BULK data size following this request.
+ */
+#define CY_FX_RQT_FRAM_WRITE            (0xC2)
+
+/* USB vendor request to initialize READ from SPI FRAM.  Any bytes of data
+ * can be read from the FRAM at a sector specified by the wIndex parameter.
+ * The maximum allowed data size is 20kBytes.  The data size read from FRAM
+ * is specified by the wValue parameter.  The data is read be a BULK IN
+ * transfer following this request.
+ */
+#define CY_FX_RQT_FRAM_READ             (0xC3)
+
 /* Endpoint and socket definitions for the bulkloop application */
 
 /* To change the producer and consumer EP enter the appropriate EP numbers for the #defines.

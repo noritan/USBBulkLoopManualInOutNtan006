@@ -56,6 +56,10 @@ CyU3PDmaChannel glChHandleBulkLpOut;     /* DMA MANUAL_OUT channel handle.      
 
 CyBool_t glIsApplnActive = CyFalse;      /* Whether the loopback application is active or not. */
 
+uint16_t    glSectorToWrite;            // Sector number to be WRITTEN
+uint16_t    glSectorToRead;             // Sector number to be READ
+uint16_t    glSizeToRead;               // Data size to be READ
+
 /* Application Error Handler */
 void
 CyFxAppErrorHandler (
@@ -296,6 +300,7 @@ CyFxBulkLpApplnUSBSetupCB (
     uint8_t  bType, bTarget;
     uint16_t wValue, wIndex;
     CyBool_t isHandled = CyFalse;
+    CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
 
     /* Decode the fields from the setup request. */
     bReqType = (setupdat0 & CY_U3P_USB_REQUEST_TYPE_MASK);
@@ -350,6 +355,34 @@ CyFxBulkLpApplnUSBSetupCB (
                 }
             }
         }
+    }
+
+    /* Handle supported vendor requests. */
+    if (bType == CY_U3P_USB_VENDOR_RQT) {
+        switch (bRequest) {
+            case CY_FX_RQT_FRAM_WRITE:
+                if (wIndex < CY_FX_N_SECTORS) {
+                    glSectorToWrite = wIndex;
+                    CyU3PUsbAckSetup();
+                    isHandled = CyTrue;
+                }
+                break;
+            case CY_FX_RQT_FRAM_READ:
+                if (wIndex < CY_FX_N_SECTORS) {
+                    glSectorToRead = wIndex;
+                    glSizeToRead = wValue;
+                    CyU3PUsbAckSetup();
+                    isHandled = CyTrue;
+                }
+                break;
+        }
+    }
+
+    /* If there was any error, return not handled so that the library will
+     * stall the request. Alternatively EP0 can be stalled here and return
+     * CyTrue. */
+    if (status != CY_U3P_SUCCESS) {
+        isHandled = CyFalse;
     }
 
     return isHandled;
