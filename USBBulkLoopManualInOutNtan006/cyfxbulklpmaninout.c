@@ -187,7 +187,8 @@ CyFxBulkLpApplnStart (
     CyU3PUsbFlushEp(CY_FX_EP_CONSUMER);
 
     /* Create a DMA MANUAL_IN channel for the producer socket. */
-    dmaCfg.size  = size;
+    // The DMA channel buffer size is independent to the USB bus speed.
+    dmaCfg.size  = CY_FX_BULKLP_DMA_BUF_SIZE;
     dmaCfg.count = CY_FX_BULKLP_DMA_BUF_COUNT;
     dmaCfg.prodSckId = CY_FX_EP_PRODUCER_SOCKET;
     dmaCfg.consSckId = CY_U3P_CPU_SOCKET_CONS;

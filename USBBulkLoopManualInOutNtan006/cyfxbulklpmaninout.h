@@ -29,7 +29,8 @@
 #include "cyu3usbconst.h"
 #include "cyu3externcstart.h"
 
-#define CY_FX_BULKLP_DMA_BUF_COUNT      (8)                       /* Bulk loop channel buffer count */
+#define CY_FX_BULKLP_DMA_BUF_SIZE       (20*1024)       // Maximum SPI packet data size
+#define CY_FX_BULKLP_DMA_BUF_COUNT      (1)             // DMA channel buffer count
 #define CY_FX_BULKLP_DMA_TX_SIZE        (0)                       /* DMA transfer size is set to infinite */
 #define CY_FX_BULKLP_THREAD_STACK       (0x1000)                  /* Bulk loop application thread stack size */
 #define CY_FX_BULKLP_THREAD_PRIORITY    (8)                       /* Bulk loop application thread priority */
