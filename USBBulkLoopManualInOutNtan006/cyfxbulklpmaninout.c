@@ -910,6 +910,20 @@ BulkLpAppThread_Entry (
                 }
 
                 /*
+                 * Write a data packet to FRAM at a sector previously
+                 * specified by the FRAM_WRITE control request.
+                 */
+                status = CyFxBulkLpFramWrite(glSectorToWrite, inBuf_p.buffer, inBuf_p.count);
+                if (status != CY_U3P_SUCCESS) {
+                    if (!glIsApplnActive) {
+                        continue;
+                    } else {
+                        CyU3PDebugPrint (4, "CyFxBulkLpFramWrite failed, Error code = %d\n", status);
+                        CyFxAppErrorHandler(status);
+                    }
+                }
+
+                /*
                  * Now discard the data from the producer channel so that the buffer is made available
                  * to receive more data.
                  */
