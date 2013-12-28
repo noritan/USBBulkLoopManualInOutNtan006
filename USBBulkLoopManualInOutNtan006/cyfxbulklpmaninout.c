@@ -753,8 +753,8 @@ main (void)
     io_cfg.useUart   = CyTrue;
     io_cfg.useI2C    = CyFalse;
     io_cfg.useI2S    = CyFalse;
-    io_cfg.useSpi    = CyFalse;
-    io_cfg.lppMode   = CY_U3P_IO_MATRIX_LPP_UART_ONLY;
+    io_cfg.useSpi    = CyTrue;
+    io_cfg.lppMode   = CY_U3P_IO_MATRIX_LPP_DEFAULT;
     /* No GPIOs are enabled. */
     io_cfg.gpioSimpleEn[0]  = 0;
     io_cfg.gpioSimpleEn[1]  = 0;
