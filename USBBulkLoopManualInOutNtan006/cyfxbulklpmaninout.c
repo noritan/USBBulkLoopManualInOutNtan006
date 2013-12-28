@@ -202,6 +202,112 @@ CyFxBulkLpSpiInit (void)
     return status;
 }
 
+/*
+ * Read a data from a specified sector
+ */
+CyU3PReturnStatus_t
+CyFxBulkLpFramRead (
+    uint16_t    sector,
+    uint8_t     *buffer,
+    uint16_t    byteCount
+) {
+    CyU3PDmaBuffer_t inBuf_p;
+    uint8_t location[4];
+    uint32_t byteAddress = 0;
+    CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+
+    /*
+     * Do nothing if 0 Byte data is required
+     */
+    if (byteCount == 0)
+    {
+        return CY_U3P_SUCCESS;
+    }
+
+    byteAddress  = CY_FX_SECTOR_SIZE * sector;
+    CyU3PDebugPrint (2, "SPI read - addr: 0x%x, size: 0x%x.\r\n",
+            byteAddress, byteCount);
+
+    /*
+     * Prepare READ command for SPI FRAM
+     */
+    location[0] = 0x03; /* Read command. */
+    location[1] = (byteAddress >> 16) & 0xFF;       /* MS byte */
+    location[2] = (byteAddress >> 8) & 0xFF;
+    location[3] = byteAddress & 0xFF;               /* LS byte */
+
+    /*
+     * Prepare DMA buffer descriptor for SPI FRAM
+     */
+    inBuf_p.buffer = buffer;
+    inBuf_p.status = 0;
+    inBuf_p.size  = CY_FX_BULKLP_DMA_BUF_SIZE;
+    inBuf_p.count = CY_FX_BULKLP_DMA_BUF_SIZE;
+
+    /*
+     * Assert Slave Select output
+     */
+    CyU3PSpiSetSsnLine (CyFalse);
+
+    /*
+     * Send pre-amble header for READ
+     */
+    status = CyU3PSpiTransmitWords (location, 4);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PDebugPrint (2, "SPI READ command failed\r\n");
+        CyU3PSpiSetSsnLine (CyTrue);
+        return status;
+    }
+
+    /*
+     * Prepare SPI transfer for READ
+     */
+    CyU3PSpiSetBlockXfer (0, byteCount);
+
+    /*
+     * Connect the DMA buffer to DMA Channel
+     */
+    status = CyU3PDmaChannelSetupRecvBuffer (&glSpiRxHandle,  &inBuf_p);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PSpiSetSsnLine (CyTrue);
+        return status;
+    }
+
+    /*
+     * Wait for the SPI block transfer completed
+     */
+    status = CyU3PSpiWaitForBlockXfer(CyTrue);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PSpiSetSsnLine (CyTrue);
+        return status;
+    }
+
+    /*
+     * Finalize the DMA channel
+     */
+    status = CyU3PDmaChannelSetWrapUp(&glSpiRxHandle);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PSpiSetSsnLine (CyTrue);
+        return status;
+    }
+
+    /*
+     * Negate Slave Select output
+     */
+    CyU3PSpiSetSsnLine (CyTrue);
+
+    /*
+     * Disconnect the DMA channel from SPI
+     */
+    CyU3PSpiDisableBlockXfer (CyFalse, CyTrue);
+
+    return CY_U3P_SUCCESS;
+}
+
 /* This function starts the bulk loop application. This is called
  * when a SET_CONF event is received from the USB host. The endpoints
  * are configured and the DMA pipe is setup in this function. */
@@ -525,9 +631,8 @@ CyFxBulkLpApplnInit (void)
     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
 
     /* Initialize the SPI interface for flash of page size 256 bytes. */
-    status = CyFxFlashProgSpiInit (0x100);
-    if (status != CY_U3P_SUCCESS)
-    {
+    status = CyFxBulkLpSpiInit ();
+    if (status != CY_U3P_SUCCESS) {
         return status;
     }
 
@@ -719,6 +824,20 @@ BulkLpAppThread_Entry (
                 }
 
                 /*
+                 * Read a data packet from FRAM at a sector previously
+                 * specified by the FRAM_READ control request.
+                 */
+                status = CyFxBulkLpFramRead(glSectorToRead, outBuf_p.buffer, glSizeToRead);
+                if (status != CY_U3P_SUCCESS) {
+                    if (!glIsApplnActive) {
+                        continue;
+                    } else {
+                        CyU3PDebugPrint (4, "CyFxBulkLpFramRead failed, Error code = %d\n", status);
+                        CyFxAppErrorHandler(status);
+                    }
+                }
+
+                /*
                  * Commit the received data to the consumer pipe so that the data can be
                  * transmitted back to the USB host. Since the same data is sent back, the
                  * count shall be same as received and the status field of the call shall
@@ -733,7 +852,7 @@ BulkLpAppThread_Entry (
                         CyFxAppErrorHandler(status);
                     }
                 }
-                if ((glSizeToRead % glPacketSize) == 0) {
+                if ((glSizeToRead > 0) && ((glSizeToRead % glPacketSize) == 0)) {
                     /*
                      * Add ZLP for aligned size of data
                      */

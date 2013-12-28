@@ -38,5 +38,26 @@ USB BULKLOOP-MANUAL_IN_OUT EXAMPLE
     * makefile             : GNU make compliant build script for compiling this
       example.
 
+    Vendor Commands implemented:
+
+    1.  Prepare WRITE to SPI FRAM
+        bmRequestType = 0x40 (Out-Vendor-Device)
+        bRequest      = 0xC2
+        wValue        = N/A
+        wIndex        = SPI FRAM sector number. The sector size is defined as 20512Bytes.
+        wLength       = 0
+
+        A BULK-OUT transfer follows to send a data packet to be written.
+        The maximum data size is 20480Bytes.
+
+    2.  Prepare READ from SPI FRAM
+        bmRequestType = 0x40 (Out-Vendor-Device)
+        bRequest      = 0xC3
+        wValue        = Length of data to be read. The maximum data size is 201480Bytes.
+        wIndex        = SPI FRAM sector number. The sector size is defined as 20512Bytes.
+        wLength       = 0
+
+        A BULK-IN transfer follows to receive a data packet read from FRAM.
+
 []
 
