@@ -38,6 +38,9 @@
 #define CY_FX_SECTOR_SIZE               (CY_FX_BULKLP_DMA_BUF_SIZE+32)  // Sector size
 #define CY_FX_N_SECTORS                 (256*1024/CY_FX_SECTOR_SIZE)    // Number of sectors in 2Mbit FRAM
 
+// Give a timeout value of 5s for any flash programming.
+#define CY_FX_FRAM_TIMEOUT              (5000)
+
 /* USB vendor requests supported by the application. */
 
 /* USB vendor request to initialize WRITE to SPI FRAM. Any bytes of data

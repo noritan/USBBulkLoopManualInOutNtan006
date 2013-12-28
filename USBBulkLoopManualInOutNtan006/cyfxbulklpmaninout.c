@@ -219,13 +219,15 @@ CyFxBulkLpFramRead (
     /*
      * Do nothing if 0 Byte data is required
      */
-    if (byteCount == 0)
-    {
+    if (byteCount == 0) {
         return CY_U3P_SUCCESS;
     }
 
+    /*
+     * Calculated the address on the FRAM
+     */
     byteAddress  = CY_FX_SECTOR_SIZE * sector;
-    CyU3PDebugPrint (2, "SPI read - addr: 0x%x, size: 0x%x.\r\n",
+    CyU3PDebugPrint (2, "SPI FRAM read - addr: 0x%x, size: 0x%x.\r\n",
             byteAddress, byteCount);
 
     /*
@@ -241,8 +243,8 @@ CyFxBulkLpFramRead (
      */
     inBuf_p.buffer = buffer;
     inBuf_p.status = 0;
-    inBuf_p.size  = CY_FX_BULKLP_DMA_BUF_SIZE;
-    inBuf_p.count = CY_FX_BULKLP_DMA_BUF_SIZE;
+    inBuf_p.size   = CY_FX_BULKLP_DMA_BUF_SIZE;
+    inBuf_p.count  = CY_FX_BULKLP_DMA_BUF_SIZE;
 
     /*
      * Assert Slave Select output
@@ -250,7 +252,7 @@ CyFxBulkLpFramRead (
     CyU3PSpiSetSsnLine (CyFalse);
 
     /*
-     * Send pre-amble header for READ
+     * Send preamble for READ
      */
     status = CyU3PSpiTransmitWords (location, 4);
     if (status != CY_U3P_SUCCESS)
@@ -286,7 +288,7 @@ CyFxBulkLpFramRead (
     }
 
     /*
-     * Finalize the DMA channel
+     * Finalize the DMA channel to disconnect from SPI
      */
     status = CyU3PDmaChannelSetWrapUp(&glSpiRxHandle);
     if (status != CY_U3P_SUCCESS)
@@ -301,9 +303,121 @@ CyFxBulkLpFramRead (
     CyU3PSpiSetSsnLine (CyTrue);
 
     /*
-     * Disconnect the DMA channel from SPI
+     * Stop Block Transfer of SPI
      */
     CyU3PSpiDisableBlockXfer (CyFalse, CyTrue);
+
+    return CY_U3P_SUCCESS;
+}
+
+/*
+ * Write a data packet to the specified sector
+ */
+CyU3PReturnStatus_t
+CyFxBulkLpFramWrite (
+    uint16_t    sector,
+    uint8_t     *buffer,
+    uint16_t    byteCount
+) {
+    CyU3PDmaBuffer_t outBuf_p;
+    uint8_t wren[1] = {0x06};  // WREN command
+    uint8_t location[4];
+    uint32_t byteAddress = 0;
+    CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+
+    /*
+     * Do nothing if 0 Byte data is required
+     */
+    if (byteCount == 0) {
+        return CY_U3P_SUCCESS;
+    }
+
+    /*
+     * Calculated the address on the FRAM
+     */
+    byteAddress  = CY_FX_SECTOR_SIZE * sector;
+    CyU3PDebugPrint (2, "SPI FRAM write - addr: 0x%x, size: 0x%x.\r\n",
+            byteAddress, byteCount);
+
+    /*
+     * Prepare WRITE command for SPI FRAM
+     */
+    location[0] = 0x02; /* Write command */
+    location[1] = (byteAddress >> 16) & 0xFF;       /* MS byte */
+    location[2] = (byteAddress >> 8) & 0xFF;
+    location[3] = byteAddress & 0xFF;               /* LS byte */
+
+    /*
+     * Prepare DMA buffer descriptor for SPI FRAM
+     */
+    outBuf_p.buffer = buffer;
+    outBuf_p.status = 0;
+    outBuf_p.size   = CY_FX_BULKLP_DMA_BUF_SIZE;
+    outBuf_p.count  = byteCount;
+
+    /*
+     * Send WREN command to enable WRITE operations
+     */
+    CyU3PSpiSetSsnLine (CyFalse);
+    status = CyU3PSpiTransmitWords (wren, 1);
+    CyU3PSpiSetSsnLine (CyTrue);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PDebugPrint (2, "FRAM WREN command failed\n\r");
+        return status;
+    }
+
+    /*
+     * Assert Slave Select output
+     */
+    CyU3PSpiSetSsnLine (CyFalse);
+
+    /*
+     * Send preamble for WRITE
+     */
+    status = CyU3PSpiTransmitWords (location, 4);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PDebugPrint (2, "SPI WRITE command failed\r\n");
+        CyU3PSpiSetSsnLine (CyTrue);
+        return status;
+    }
+
+    /*
+     * Prepare SPI transfer for WRITE
+     */
+    CyU3PSpiSetBlockXfer (byteCount, 0);
+
+    /*
+     * Connect the DMA buffer to DMA Channel
+     */
+    status = CyU3PDmaChannelSetupSendBuffer (&glSpiTxHandle, &outBuf_p);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PSpiSetSsnLine (CyTrue);
+        return status;
+    }
+
+    /*
+     * Wait for the SPI block transfer completed
+     */
+    status = CyU3PDmaChannelWaitForCompletion(&glSpiTxHandle,
+            CY_FX_FRAM_TIMEOUT);
+    if (status != CY_U3P_SUCCESS)
+    {
+        CyU3PSpiSetSsnLine (CyTrue);
+        return status;
+    }
+
+    /*
+     * Negate Slave Select output
+     */
+    CyU3PSpiSetSsnLine (CyTrue);
+
+    /*
+     * Stop Block Transfer of SPI
+     */
+    CyU3PSpiDisableBlockXfer (CyTrue, CyFalse);
 
     return CY_U3P_SUCCESS;
 }
