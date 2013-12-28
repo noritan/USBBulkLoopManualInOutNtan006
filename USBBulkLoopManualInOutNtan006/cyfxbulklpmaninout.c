@@ -525,7 +525,7 @@ CyFxBulkLpApplnInit (void)
     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
 
     /* Initialize the SPI interface for flash of page size 256 bytes. */
-    status = CyFxFlashProgSpiInit (0x100);
+    status = CyFxBulkLpSpiInit ();
     if (status != CY_U3P_SUCCESS)
     {
         return status;
