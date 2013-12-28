@@ -49,10 +49,12 @@
 #include "cyfxbulklpmaninout.h"
 #include "cyu3usb.h"
 #include "cyu3uart.h"
-
+#include "cyu3spi.h"
 CyU3PThread     BulkLpAppThread;	 /* Bulk loop application thread structure */
 CyU3PDmaChannel glChHandleBulkLpIn;      /* DMA MANUAL_IN channel handle.          */
 CyU3PDmaChannel glChHandleBulkLpOut;     /* DMA MANUAL_OUT channel handle.         */
+CyU3PDmaChannel glSpiTxHandle;          // SPI Tx channel handle
+CyU3PDmaChannel glSpiRxHandle;          // SPI Rx channel handle
 
 CyBool_t glIsApplnActive = CyFalse;      /* Whether the loopback application is active or not. */
 
@@ -126,6 +128,78 @@ CyFxBulkLpApplnDebugInit (void)
     {
         CyFxAppErrorHandler(apiRetStatus);
     }
+}
+
+/*
+ * SPI initialization for FRAM programmer application.
+ */
+CyU3PReturnStatus_t
+CyFxBulkLpSpiInit (void)
+{
+    CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+    CyU3PSpiConfig_t spiConfig;
+    CyU3PDmaChannelConfig_t dmaConfig;
+
+    /* Start the SPI module and configure the master. */
+    status = CyU3PSpiInit();
+    if (status != CY_U3P_SUCCESS)
+    {
+        return status;
+    }
+
+    /*
+     * Start the SPI master block. Run the SPI clock at 24MHz
+     * and configure the word length to 8 bits. Also configure
+     * the slave select using the firmware.
+     */
+    CyU3PMemSet ((uint8_t *)&spiConfig, 0, sizeof(spiConfig));
+    spiConfig.isLsbFirst = CyFalse;
+    spiConfig.cpol       = CyTrue;
+    spiConfig.ssnPol     = CyFalse;
+    spiConfig.cpha       = CyTrue;
+    spiConfig.leadTime   = CY_U3P_SPI_SSN_LAG_LEAD_HALF_CLK;
+    spiConfig.lagTime    = CY_U3P_SPI_SSN_LAG_LEAD_HALF_CLK;
+    spiConfig.ssnCtrl    = CY_U3P_SPI_SSN_CTRL_FW;
+    spiConfig.clock      = 24000000;
+    spiConfig.wordLen    = 8;
+
+    status = CyU3PSpiSetConfig (&spiConfig, NULL);
+    if (status != CY_U3P_SUCCESS)
+    {
+        return status;
+    }
+
+    /* Create the DMA channels for SPI write and read. */
+    CyU3PMemSet ((uint8_t *)&dmaConfig, 0, sizeof(dmaConfig));
+    dmaConfig.size           = CY_FX_BULKLP_DMA_BUF_SIZE;
+    /* No buffers need to be allocated as this channel
+     * will be used only in override mode. */
+    dmaConfig.count          = 0;
+    dmaConfig.prodAvailCount = 0;
+    dmaConfig.dmaMode        = CY_U3P_DMA_MODE_BYTE;
+    dmaConfig.prodHeader     = 0;
+    dmaConfig.prodFooter     = 0;
+    dmaConfig.consHeader     = 0;
+    dmaConfig.notification   = 0;
+    dmaConfig.cb             = NULL;
+
+    /* Channel to write to SPI flash. */
+    dmaConfig.prodSckId = CY_U3P_CPU_SOCKET_PROD;
+    dmaConfig.consSckId = CY_U3P_LPP_SOCKET_SPI_CONS;
+    status = CyU3PDmaChannelCreate (&glSpiTxHandle,
+            CY_U3P_DMA_TYPE_MANUAL_OUT, &dmaConfig);
+    if (status != CY_U3P_SUCCESS)
+    {
+        return status;
+    }
+
+    /* Channel to read from SPI flash. */
+    dmaConfig.prodSckId = CY_U3P_LPP_SOCKET_SPI_PROD;
+    dmaConfig.consSckId = CY_U3P_CPU_SOCKET_CONS;
+    status = CyU3PDmaChannelCreate (&glSpiRxHandle,
+            CY_U3P_DMA_TYPE_MANUAL_IN, &dmaConfig);
+
+    return status;
 }
 
 /* This function starts the bulk loop application. This is called
@@ -444,10 +518,18 @@ CyFxBulkLpApplnLPMRqtCB (
 /* This function initializes the USB Module, sets the enumeration descriptors.
  * This function does not start the bulk streaming and this is done only when
  * SET_CONF event is received. */
-void
+CyU3PReturnStatus_t
 CyFxBulkLpApplnInit (void)
 {
     CyU3PReturnStatus_t apiRetStatus = CY_U3P_SUCCESS;
+    CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
+
+    /* Initialize the SPI interface for flash of page size 256 bytes. */
+    status = CyFxFlashProgSpiInit (0x100);
+    if (status != CY_U3P_SUCCESS)
+    {
+        return status;
+    }
 
     /* Start the USB functionality. */
     apiRetStatus = CyU3PUsbStart();
@@ -557,6 +639,8 @@ CyFxBulkLpApplnInit (void)
         CyU3PDebugPrint (4, "USB Connect failed, Error code = %d\n", apiRetStatus);
         CyFxAppErrorHandler(apiRetStatus);
     }
+
+    return CY_U3P_SUCCESS;
 }
 
 /* Entry function for the BulkLpAppThread. */
@@ -572,7 +656,11 @@ BulkLpAppThread_Entry (
     CyFxBulkLpApplnDebugInit();
 
     /* Initialize the bulk loop application */
-    CyFxBulkLpApplnInit();
+    status = CyFxBulkLpApplnInit();
+    if (status != CY_U3P_SUCCESS)
+    {
+        goto handle_error;
+    }
 
     for (;;) {
         if (glIsApplnActive) {
@@ -674,6 +762,10 @@ BulkLpAppThread_Entry (
             CyU3PThreadSleep (100);
         }
     }
+
+handle_error:
+    CyU3PDebugPrint (4, "Application failed to initialize. Error code: %d.\n", status);
+    while (1);
 }
 
 /* Application define function which creates the threads. */
