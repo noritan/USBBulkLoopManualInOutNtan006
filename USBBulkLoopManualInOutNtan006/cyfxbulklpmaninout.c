@@ -204,6 +204,21 @@ CyFxBulkLpSpiInit (void)
 
 /*
  * Read a data from a specified sector
+ *
+ * Parameters
+ *
+ * uint16_t sector
+ *     The sector number where the data to be read is located.
+ *     The maximum number is specified in the header file.
+ *     No sector number validation is implemented in this function.
+ * uint8_t *buffer
+ *     Buffer address where the read data is to be stored.
+ *     The buffer should be a 32 byte aligned address because the
+ *     value is directly used for the DMA channel buffer.
+ * uint16_t byteCount
+ *     The number of bytes to be read from the SPI FRAM.
+ *     The maximum byte count is specified in the header file.
+ *
  */
 CyU3PReturnStatus_t
 CyFxBulkLpFramRead (
@@ -217,14 +232,16 @@ CyFxBulkLpFramRead (
     CyU3PReturnStatus_t status = CY_U3P_SUCCESS;
 
     /*
-     * Do nothing if 0 Byte data is required
+     * Do nothing if 0 Byte data is required.
      */
     if (byteCount == 0) {
         return CY_U3P_SUCCESS;
     }
 
     /*
-     * Calculated the address on the FRAM
+     * Calculate the address of the sector on the SPI FRAM
+     * The address is calculated by the sector size specified
+     * in the header file.
      */
     byteAddress  = CY_FX_SECTOR_SIZE * sector;
     CyU3PDebugPrint (2, "SPI FRAM read - addr: 0x%x, size: 0x%x.\r\n",
@@ -232,6 +249,7 @@ CyFxBulkLpFramRead (
 
     /*
      * Prepare READ command for SPI FRAM
+     * A command code and three byte address are provided as preamble.
      */
     location[0] = 0x03; /* Read command. */
     location[1] = (byteAddress >> 16) & 0xFF;       /* MS byte */
@@ -239,7 +257,8 @@ CyFxBulkLpFramRead (
     location[3] = byteAddress & 0xFF;               /* LS byte */
 
     /*
-     * Prepare DMA buffer descriptor for SPI FRAM
+     * Prepare DMA buffer descriptor for the SPI FRAM
+     * Both size and count field have the size of the DMA buffer.
      */
     inBuf_p.buffer = buffer;
     inBuf_p.status = 0;
@@ -248,11 +267,12 @@ CyFxBulkLpFramRead (
 
     /*
      * Assert Slave Select output
+     * A SPI transfer begins.
      */
     CyU3PSpiSetSsnLine (CyFalse);
 
     /*
-     * Send preamble for READ
+     * Send a READ command to the SPI FRAM
      */
     status = CyU3PSpiTransmitWords (location, 4);
     if (status != CY_U3P_SUCCESS)
@@ -264,11 +284,16 @@ CyFxBulkLpFramRead (
 
     /*
      * Prepare SPI transfer for READ
+     * This API specifies how many words will be read from the SPI.
+     * In the other words, this specifies the number of SCK pulses
+     * to be generated.
      */
     CyU3PSpiSetBlockXfer (0, byteCount);
 
     /*
      * Connect the DMA buffer to DMA Channel
+     * The DMA buffer descriptor is provided to the DMA Channel
+     * to read and store the data from the SPI FRAM.
      */
     status = CyU3PDmaChannelSetupRecvBuffer (&glSpiRxHandle,  &inBuf_p);
     if (status != CY_U3P_SUCCESS)
@@ -279,6 +304,8 @@ CyFxBulkLpFramRead (
 
     /*
      * Wait for the SPI block transfer completed
+     * This API returns when the SCK pulses are generated
+     * to get the data from the SPI FRAM.
      */
     status = CyU3PSpiWaitForBlockXfer(CyTrue);
     if (status != CY_U3P_SUCCESS)
@@ -289,6 +316,8 @@ CyFxBulkLpFramRead (
 
     /*
      * Finalize the DMA channel to disconnect from SPI
+     * This API finished the DMA channel transfer whenever the DMA
+     * buffer is not full.
      */
     status = CyU3PDmaChannelSetWrapUp(&glSpiRxHandle);
     if (status != CY_U3P_SUCCESS)
@@ -299,11 +328,14 @@ CyFxBulkLpFramRead (
 
     /*
      * Negate Slave Select output
+     * This indicates the end of SPI transfer.
      */
     CyU3PSpiSetSsnLine (CyTrue);
 
     /*
      * Stop Block Transfer of SPI
+     * Disable the block transfer mode of SPI to disconnect
+     * from the DMA channel.
      */
     CyU3PSpiDisableBlockXfer (CyFalse, CyTrue);
 
@@ -312,6 +344,21 @@ CyFxBulkLpFramRead (
 
 /*
  * Write a data packet to the specified sector
+ *
+ * Parameters
+ *
+ * uint16_t sector
+ *     The sector number where the data to be written is located.
+ *     The maximum number is specified in the header file.
+ *     No sector number validation is implemented in this function.
+ * uint8_t *buffer
+ *     Buffer address where the data to be written is stored.
+ *     The buffer should be a 32 byte aligned address because the
+ *     value is directly used for the DMA channel buffer.
+ * uint16_t byteCount
+ *     The number of bytes to be written to the SPI FRAM.
+ *     The maximum byte count is specified in the header file.
+ *
  */
 CyU3PReturnStatus_t
 CyFxBulkLpFramWrite (
@@ -333,7 +380,9 @@ CyFxBulkLpFramWrite (
     }
 
     /*
-     * Calculated the address on the FRAM
+     * Calculate the address of the sector on the SPI FRAM
+     * The address is calculated by the sector size specified
+     * in the header file.
      */
     byteAddress  = CY_FX_SECTOR_SIZE * sector;
     CyU3PDebugPrint (2, "SPI FRAM write - addr: 0x%x, size: 0x%x.\r\n",
@@ -341,6 +390,7 @@ CyFxBulkLpFramWrite (
 
     /*
      * Prepare WRITE command for SPI FRAM
+     * A command code and three byte address are provided as preamble.
      */
     location[0] = 0x02; /* Write command */
     location[1] = (byteAddress >> 16) & 0xFF;       /* MS byte */
@@ -349,6 +399,9 @@ CyFxBulkLpFramWrite (
 
     /*
      * Prepare DMA buffer descriptor for SPI FRAM
+     * Prepare DMA buffer descriptor for the SPI FRAM
+     * The size field have the size of the DMA buffer.
+     * The count field has the byte count to be written.
      */
     outBuf_p.buffer = buffer;
     outBuf_p.status = 0;
@@ -357,6 +410,7 @@ CyFxBulkLpFramWrite (
 
     /*
      * Send WREN command to enable WRITE operations
+     * WREN command should be issued prior the WRITE command.
      */
     CyU3PSpiSetSsnLine (CyFalse);
     status = CyU3PSpiTransmitWords (wren, 1);
@@ -369,11 +423,12 @@ CyFxBulkLpFramWrite (
 
     /*
      * Assert Slave Select output
+     * A SPI transfer begins.
      */
     CyU3PSpiSetSsnLine (CyFalse);
 
     /*
-     * Send preamble for WRITE
+     * Send a WRITE command to the SPI FRAM
      */
     status = CyU3PSpiTransmitWords (location, 4);
     if (status != CY_U3P_SUCCESS)
@@ -385,11 +440,16 @@ CyFxBulkLpFramWrite (
 
     /*
      * Prepare SPI transfer for WRITE
+     * This API specifies how many words will be written to the SPI.
+     * In the other words, this specifies the number of SCK pulses
+     * to be generated.
      */
     CyU3PSpiSetBlockXfer (byteCount, 0);
 
     /*
      * Connect the DMA buffer to DMA Channel
+     * The DMA buffer descriptor is provided to the DMA Channel
+     * to write the data to the SPI FRAM.
      */
     status = CyU3PDmaChannelSetupSendBuffer (&glSpiTxHandle, &outBuf_p);
     if (status != CY_U3P_SUCCESS)
@@ -399,7 +459,8 @@ CyFxBulkLpFramWrite (
     }
 
     /*
-     * Wait for the SPI block transfer completed
+     * Wait for the DMA Channel completed
+     * This API returns when all data stored in the DMA buffer are sent.
      */
     status = CyU3PDmaChannelWaitForCompletion(&glSpiTxHandle,
             CY_FX_FRAM_TIMEOUT);
@@ -411,11 +472,14 @@ CyFxBulkLpFramWrite (
 
     /*
      * Negate Slave Select output
+     * This indicates the end of SPI transfer.
      */
     CyU3PSpiSetSsnLine (CyTrue);
 
     /*
      * Stop Block Transfer of SPI
+     * Disable the block transfer mode of SPI to disconnect
+     * from the DMA channel.
      */
     CyU3PSpiDisableBlockXfer (CyTrue, CyFalse);
 
@@ -939,7 +1003,8 @@ BulkLpAppThread_Entry (
             }
             if (eventFlags & CY_FX_FRAM_READ_READY) {
                 /*
-                 * Wait for a free buffer to transmit the received data. The failure cases are same as above.
+                 * Wait for a free buffer to be used to transmit the received data.
+                 * The failure cases are same as above.
                  */
                 status = CyU3PDmaChannelGetBuffer (&glChHandleBulkLpOut, &outBuf_p, CYU3P_WAIT_FOREVER);
                 if (status != CY_U3P_SUCCESS) {
