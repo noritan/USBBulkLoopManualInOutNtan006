@@ -732,8 +732,8 @@ CyFxBulkLpApplnUSBSetupCB (
             case CY_FX_RQT_FRAM_READ:
                 if (wIndex < CY_FX_N_SECTORS) {
                     glSectorToRead = wIndex;
-                    CyU3PEventSet (&glFramEvent, CY_FX_FRAM_READ_READY, CYU3P_EVENT_OR);
                     glSizeToRead = wValue;
+                    CyU3PEventSet (&glFramEvent, CY_FX_FRAM_READ_READY, CYU3P_EVENT_OR);
                     CyU3PUsbAckSetup();
                     isHandled = CyTrue;
                 }
